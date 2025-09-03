@@ -29,7 +29,7 @@ model_name = "gpt-4o-mini"
 # ------------- 唯一需要动的地方：把 requests 换成 pyfetch -----------------
 async def query_model(food_name, template_name):
     """调用 AI 模型获取糖度值（浏览器内异步版）"""
-    prompt = templates.get(template_name, templates["default_v0.0.3_extra"])
+    prompt = templates.get(template_name, templates["default_v0.0.4"])
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -100,7 +100,7 @@ with gr.Blocks(title="糖度计") as demo:
             food_input = gr.Textbox(label="输入食物名称")
             template_dropdown = gr.Dropdown(
                 choices=list(templates.keys()),
-                value="default_v0.0.3_extra",
+                value="default_v0.0.4",
                 label="模版选择"
             )
             btn = gr.Button("开始检测")
