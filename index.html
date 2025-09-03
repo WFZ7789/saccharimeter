@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <title>糖度计</title>
+  <script type="module"
+          src="https://cdn.jsdelivr.net/npm/@gradio/lite@latest/dist/lite.js"></script>
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/@gradio/lite@latest/dist/lite.css"/>
+</head>
+<body>
+<gradio-lite>
+import gradio as gr
+import json
+import asyncio
+from pyodide.http import pyfetch   # 浏览器内可用
+
+###############################################################################
+# 全局变量（与原来保持一致，方便 update_settings 直接修改）
+templates = {
+    "default_v0.0.4":
+    "# 糖度计AI Agent系统提示词\n\n## 核心功能\n你是一个专业的"糖度计"AI Agent，能够为输入的内容计算和评估"糖度"值。糖度有两种含义：\n1. **食物糖度**：使用Brix值衡量食物的实际含糖量\n2. **网络俚语糖度**：衡量事件、人物、行为等对周围环境产生的负面影响程度或令人感到羞愧/恶心/低能/离谱的程度\n\n## 输出格式要求\n**只输出一个浮点数表示糖度**\n\n## 数值评分标准\n\n### 食物类输入（Brix糖度）\n- **0.0-5.0**：几乎无糖（如纯水、某些蔬菜）\n- **5.0-15.0**：低糖（如西瓜、柠檬、大部分蔬菜）\n- **15.0-25.0**：中等糖度（如苹果、橙子、胡萝卜）\n- **25.0-40.0**：高糖（如葡萄、香蕉、甜瓜）\n- **40.0-70.0**：极高糖度（如蜂蜜、果酱、糖浆）\n- **70.0-100.0**：接近纯糖（如白砂糖、冰糖）\n\n### 事件/人物类输入（网络俚语糖度）\n- **0.0-10.0**：轻微尴尬或小负面影响\n- **10.0-30.0**：中等程度的令人不适或羞愧\n- **30.0-50.0**：较强的负面影响，令人反感，低能\n- **50.0-70.0**：严重的恶心感或强烈羞愧\n- **70.0-100.0**：极度令人厌恶，产生巨大负面影响\n- **100.0以上**：史诗级糖度，令人难以忘怀的极端负面事件，极度无能\n\n## 评分参考因素\n\n### 食物评分依据\n- 查阅真实的Brix值数据\n- 考虑食物的自然含糖量\n- 区分天然糖分和添加糖分\n- 参考科学测量标准\n\n### 事件/人物评分依据\n- **社会影响**：对公众或群体造成的负面影响范围和深度\n- **道德层面**：违背社会伦理道德的程度\n- **尴尬程度**：令当事人或观众感到羞愧的强度\n- **持续影响**：负面影响的持久性和传播性\n- **公众反应**：社会舆论的激烈程度和一致性\n\n## 特殊情况处理\n1. **信息不足**：根据常识给出合理估值（范围0.0-100.0）\n2. **歧义输入**：优先按照上下文判断是食物还是事件\n3. **争议性内容**：保持客观中立，基于公认事实评分\n4. **极端情况**：糖度过高时可超过100\n\n## 示例输出\n\n### 食物类\n输入："蜂蜜"\n输出：`82.5`\n\n输入："黄瓜"\n输出：`2.8`\n\n### 事件/人物类\n输入："公共场所大声接电话"\n输出：`15.2`\n\n输入："网红直播带货虚假宣传被曝光"\n输出：`68.9`\n\n## 执行指令\n1. 仔细分析输入内容的类型和背景\n2. 根据相应标准进行评分\n3. **只输出浮点数值，不要任何解释或评价文字**\n4. 数值范围控制在[0.000000,100.000000]，极端情况可超过100\n5. 信息不足时给出合理估值，**不允许输出负值**\n\n**记住：始终保持客观公正，基于事实评分，只输出数值结果。**"
+}
+api_url   = "https://api.openai.com/v1/chat/completions"
+api_key   = ""
+model_name = "gpt-4o-mini"
+###############################################################################
+
+# ------------- 唯一需要动的地方：把 requests 换成 pyfetch -----------------
+async def query_model(food_name, template_name):
+    """调用 AI 模型获取糖度值（浏览器内异步版）"""
+    prompt = templates.get(template_name, templates["default_v0.0.3_extra"])
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": food_name}
+        ]
+    }
+
+    try:
+        resp = await pyfetch(
+            api_url,
+            method="POST",
+            headers=headers,
+            body=json.dumps(payload)
+        )
+        if not resp.ok:
+            return "0.0", f"HTTP {resp.status}", f"HTTP {resp.status}"
+        data = await resp.json()
+        raw_output = data["choices"][0]["message"]["content"].strip()
+        val = float(raw_output)
+    except Exception as e:
+        return "0.0", f"错误: {e}", f"错误: {e}"
+
+    # 分类评语（完全沿用原逻辑）
+    if val < 20.0:
+        remark = "🟦 低糖"
+    elif val < 60.0:
+        remark = "🟩 中糖"
+    elif val < 80.0:
+        remark = "🟧 高糖"
+    elif val <= 100.0:
+        remark = "🟥 糖王"
+    else:
+        remark = "🌌 糖到没边"
+
+    return str(val), remark, raw_output
+# --------------------------------------------------------------------------
+
+def add_template(new_name, new_content):
+    """添加新模版并同步更新两个下拉列表（原逻辑不动）"""
+    if new_name and new_content:
+        templates[new_name] = new_content
+        updated_keys = list(templates.keys())
+        return updated_keys, gr.Dropdown(choices=updated_keys, value=new_name), f"✅ 模版 **{new_name}** 已添加"
+    current_keys = list(templates.keys())
+    return current_keys, gr.Dropdown(choices=current_keys, value=current_keys[0]), "❌ 添加失败：名称或内容不能为空"
+
+def update_settings(url, model, key):
+    """更新 API 设置（原逻辑不动）"""
+    global api_url, model_name, api_key
+    if url:
+        api_url = url
+    if model:
+        model_name = model
+    if key:
+        api_key = key
+    return f"✅ 已更新设置\nAPI URL: {api_url}\n模型: {model_name}"
+
+with gr.Blocks(title="糖度计") as demo:
+    gr.Markdown("# 🍬 糖度计")
+
+    with gr.Tabs():
+        with gr.Tab("检测"):
+            food_input = gr.Textbox(label="输入食物名称")
+            template_dropdown = gr.Dropdown(
+                choices=list(templates.keys()),
+                value="default_v0.0.3_extra",
+                label="模版选择"
+            )
+            btn = gr.Button("开始检测")
+            with gr.Row():
+                val_output   = gr.Textbox(label="糖度值", lines=1, interactive=False)
+                remark_output = gr.Textbox(label="鉴定", lines=1, interactive=False)
+
+            # 注意：Gradio Lite 按钮点击事件需要写成异步
+            btn.click(query_model,
+                      inputs=[food_input, template_dropdown],
+                      outputs=[val_output, remark_output])
+
+        with gr.Tab("模版管理"):
+            new_name = gr.Textbox(label="新模版名称")
+            new_content = gr.Textbox(label="新模版提示词", lines=5)
+            add_btn = gr.Button("添加模版")
+            template_list = gr.Dropdown(choices=list(templates.keys()), label="现有模版")
+            add_status = gr.Textbox(label="状态", interactive=False)
+
+            add_btn.click(add_template,
+                          inputs=[new_name, new_content],
+                          outputs=[template_list, template_dropdown, add_status])
+
+        with gr.Tab("高级设置"):
+            api_url_in = gr.Textbox(label="API URL", value=api_url)
+            model_in   = gr.Textbox(label="模型名称", value=model_name)
+            api_key_in = gr.Textbox(label="API Key", type="password", value=api_key)
+            update_btn = gr.Button("更新设置")
+            update_status = gr.Textbox(label="状态", interactive=False)
+
+            update_btn.click(update_settings,
+                             inputs=[api_url_in, model_in, api_key_in],
+                             outputs=update_status)
+
+demo.launch()
+</gradio-lite>
+</body>
+</html>
